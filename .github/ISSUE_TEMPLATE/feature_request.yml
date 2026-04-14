@@ -1,0 +1,57 @@
+name: Security feature task
+description: Create a student assignment to implement a web security feature
+title: "[Security Feature Task]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to assign students a feature task related to web security.
+  - type: textarea
+    id: objective
+    attributes:
+      label: Learning objective
+      description: Describe what students should learn by completing this task.
+      placeholder: Practice designing and implementing a secure feature in the Django app.
+    validations:
+      required: true
+  - type: textarea
+    id: security-goal
+    attributes:
+      label: Security goal
+      description: Describe the security capability or protection the feature should provide.
+      placeholder: Add rate limiting, stronger input validation, audit logging, or similar.
+    validations:
+      required: true
+  - type: textarea
+    id: requested-feature
+    attributes:
+      label: Requested implementation
+      description: Describe the feature students should build.
+      placeholder: Explain the expected behavior, user flow, and any important constraints.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List the requirements that define a complete solution.
+      placeholder: |
+        - The feature mitigates the targeted risk
+        - The implementation is documented in the pull request
+        - Existing behavior still works
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and hints
+      description: Share relevant files, routes, components, or design constraints.
+    validations:
+      required: false
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add references, examples, mockups, or classroom notes.
+    validations:
+      required: false
