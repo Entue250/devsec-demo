@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 
-from .models import LoginAttempt
+from .models import LoginAttempt, UserProfile
 
 admin.site.unregister(User)
 admin.site.register(User, UserAdmin)
@@ -17,3 +17,9 @@ class LoginAttemptAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'bio')
+    search_fields = ('user__username',)

@@ -1,4 +1,4 @@
-﻿
+﻿from django.contrib.auth.models import User
 from django.db import models
 from django.utils import timezone
 
@@ -59,3 +59,24 @@ class LoginAttempt(models.Model):
         self.last_failed_at = None
         self.locked_until = None
         self.save()
+
+
+class UserProfile(models.Model):
+    """
+    Extends the built-in User with a free-text bio field.
+
+    XSS risk: this field accepts arbitrary text from the user.
+    It must never be rendered with |safe or mark_safe() in templates
+    because that would allow stored XSS. Django's default auto-escaping
+    in templates handles this correctly when {{ profile.bio }} is used
+    without any unsafe filter.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    bio = models.TextField(blank=True, max_length=500)
+
+    class Meta:
+        verbose_name = 'User profile'
+        verbose_name_plural = 'User profiles'
+
+    def __str__(self):
+        return f'Profile for {self.user.username}'

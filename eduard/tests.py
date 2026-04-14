@@ -6,7 +6,7 @@ from django.contrib.auth.models import Group
 from django.core import mail
 from .models import LoginAttempt
 from eduard.views import _is_safe_url
-
+from .models import LoginAttempt, UserProfile
 
 class RegistrationTests(TestCase):
     def test_register_page_loads(self):
@@ -657,3 +657,72 @@ def test_password_reset_request_is_logged(self):
     self.assertTrue(
         any('event=password_reset_request' in m for m in log.output)
     )
+
+
+
+
+class StoredXSSTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='xssuser',
+            password='TestPass123!',
+        )
+        self.client.login(username='xssuser', password='TestPass123!')
+        self.profile_url = reverse('eduard:profile')
+
+    def test_bio_saves_and_displays_plain_text(self):
+        self.client.post(self.profile_url, {'bio': 'Hello I am Eduard'})
+        response = self.client.get(self.profile_url)
+        self.assertContains(response, 'Hello I am Eduard')
+
+    def test_script_tag_in_bio_is_escaped_not_executed(self):
+        """
+        A script tag stored in the bio must appear as escaped text
+        in the HTML source, never as a live script element.
+        Django's auto-escaping converts < to &lt; and > to &gt;
+        so the browser displays the tag as text rather than executing it.
+        """
+        payload = '<script>alert("xss")</script>'
+        self.client.post(self.profile_url, {'bio': payload})
+        response = self.client.get(self.profile_url)
+        content = response.content.decode()
+        self.assertNotIn('<script>alert("xss")</script>', content)
+        self.assertIn('&lt;script&gt;', content)
+
+    def test_html_tags_in_bio_are_escaped(self):
+        """HTML tags must be rendered as visible text, not as markup."""
+        self.client.post(self.profile_url, {'bio': '<b>bold</b>'})
+        response = self.client.get(self.profile_url)
+        content = response.content.decode()
+        self.assertNotIn('<b>bold</b>', content)
+        self.assertIn('&lt;b&gt;', content)
+
+    def test_javascript_url_in_bio_is_escaped(self):
+        """javascript: URLs stored in bio must be escaped as HTML entities."""
+        self.client.post(
+            self.profile_url,
+            {'bio': '<a href="javascript:alert(1)">click</a>'},
+        )
+        response = self.client.get(self.profile_url)
+        content = response.content.decode()
+        self.assertNotIn('<a href="javascript:alert(1)">click</a>', content)
+        self.assertIn('&lt;a href=&quot;javascript:alert(1)&quot;&gt;', content)
+    def test_bio_max_length_enforced(self):
+        """Bio must not accept more than 500 characters."""
+        response = self.client.post(
+            self.profile_url,
+            {'bio': 'A' * 501},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(UserProfile.objects.get(user=self.user).bio == 'A' * 501)
+
+    def test_safe_filter_not_used_in_bio_template(self):
+        """
+        Confirm the template does not use the |safe filter on the bio
+        field, which would disable Django's auto-escaping and reintroduce
+        the XSS risk.
+        """
+        with open('eduard/templates/eduard/profile.html', encoding='utf-8') as f:
+            template_source = f.read()
+        self.assertNotIn('bio|safe', template_source)
+        self.assertNotIn('bio | safe', template_source)

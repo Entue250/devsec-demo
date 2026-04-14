@@ -26,6 +26,8 @@ from .models import LoginAttempt
 from django.contrib.auth.views import PasswordResetView
 from django.urls import reverse_lazy
 
+from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm, BioForm
+from .models import LoginAttempt, UserProfile
 
 def _is_safe_url(url, request):
     """
@@ -126,8 +128,31 @@ def dashboard(request):
 
 @login_required
 def profile(request):
-    return render(request, 'eduard/profile.html', {'profile_user': request.user})
+    """
+    Display and update the current user's profile including their bio.
 
+    XSS fix: the bio is rendered in the template using {{ profile.bio }}
+    with no |safe filter. Django auto-escaping converts any HTML
+    characters to their safe entity equivalents before sending them
+    to the browser, so stored script tags are displayed as text, not
+    executed.
+    """
+    user_profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    if request.method == 'POST':
+        form = BioForm(request.POST, instance=user_profile)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Bio updated successfully.')
+            return redirect('eduard:profile')
+    else:
+        form = BioForm(instance=user_profile)
+
+    return render(request, 'eduard/profile.html', {
+        'profile_user': request.user,
+        'user_profile': user_profile,
+        'bio_form': form,
+    })
 
 @login_required
 def profile_by_id(request, user_id):
@@ -139,8 +164,12 @@ def profile_by_id(request, user_id):
     if not is_privileged:
         raise PermissionDenied
     profile_user = get_object_or_404(User, id=user_id)
-    return render(request, 'eduard/profile.html', {'profile_user': profile_user})
-
+    user_profile, _ = UserProfile.objects.get_or_create(user=profile_user)
+    return render(request, 'eduard/profile.html', {
+        'profile_user': profile_user,
+        'user_profile': user_profile,
+        'bio_form': None,
+    })
 
 @login_required
 def change_password(request):
