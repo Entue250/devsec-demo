@@ -1,5 +1,5 @@
 import json
-import logging
+
 
 from django.contrib import messages
 from django.contrib.auth import login, logout, update_session_auth_hash
