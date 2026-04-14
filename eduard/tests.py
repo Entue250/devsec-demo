@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.models import Group
 from django.core import mail
 from .models import LoginAttempt
+from eduard.views import _is_safe_url
 
 
 class RegistrationTests(TestCase):
@@ -458,3 +459,104 @@ def test_logout_requires_post(self):
             self.client.session,
             msg='GET request must not log the user out',
         )
+
+
+
+class OpenRedirectTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='redirectuser',
+            password='TestPass123!',
+        )
+        self.login_url = reverse('eduard:login')
+
+    def _login_with_next(self, next_url):
+        """Helper to POST a login with a next parameter."""
+        return self.client.post(
+            f'{self.login_url}?next={next_url}',
+            {
+                'username': 'redirectuser',
+                'password': 'TestPass123!',
+                'next': next_url,
+            },
+        )
+
+    def test_safe_internal_redirect_is_allowed(self):
+        """A relative internal path must be followed after login."""
+        response = self._login_with_next('/profile/')
+        self.assertRedirects(
+            response,
+            '/profile/',
+            fetch_redirect_response=False,
+        )
+
+    def test_external_redirect_is_rejected(self):
+        """
+        An absolute URL pointing to an external host must be rejected.
+        The user must land on the dashboard instead of the external site.
+        """
+        response = self._login_with_next('https://evil.com')
+        self.assertRedirects(
+            response,
+            reverse('eduard:dashboard'),
+            fetch_redirect_response=False,
+        )
+
+    def test_external_redirect_with_double_slash_is_rejected(self):
+        """
+        //evil.com is a protocol-relative URL that browsers treat as
+        an external redirect. It must be rejected.
+        """
+        response = self._login_with_next('//evil.com')
+        self.assertRedirects(
+            response,
+            reverse('eduard:dashboard'),
+            fetch_redirect_response=False,
+        )
+
+    def test_javascript_scheme_is_rejected(self):
+        """
+        javascript:// URLs must be rejected to prevent XSS via redirect.
+        """
+        response = self._login_with_next('javascript://alert(1)')
+        self.assertRedirects(
+            response,
+            reverse('eduard:dashboard'),
+            fetch_redirect_response=False,
+        )
+
+    def test_empty_next_falls_back_to_dashboard(self):
+        """An empty next parameter must redirect to the dashboard."""
+        response = self._login_with_next('')
+        self.assertRedirects(
+            response,
+            reverse('eduard:dashboard'),
+            fetch_redirect_response=False,
+        )
+
+    def test_missing_next_falls_back_to_dashboard(self):
+        """No next parameter must redirect to the dashboard."""
+        response = self.client.post(self.login_url, {
+            'username': 'redirectuser',
+            'password': 'TestPass123!',
+        })
+        self.assertRedirects(
+            response,
+            reverse('eduard:dashboard'),
+            fetch_redirect_response=False,
+        )
+
+    def test_is_safe_url_accepts_relative_path(self):
+        """Unit test the helper directly with a safe relative path."""
+        request = self.client.get('/').wsgi_request
+        self.assertTrue(_is_safe_url('/profile/', request))
+
+    def test_is_safe_url_rejects_external_host(self):
+        """Unit test the helper directly with an external host."""
+        request = self.client.get('/').wsgi_request
+        self.assertFalse(_is_safe_url('https://evil.com', request))
+
+    def test_is_safe_url_rejects_none(self):
+        """Unit test the helper directly with None input."""
+        request = self.client.get('/').wsgi_request
+        self.assertFalse(_is_safe_url(None, request))

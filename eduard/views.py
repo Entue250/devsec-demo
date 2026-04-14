@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404, render, redirect
 from .models import LoginAttempt
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from .decorators import instructor_required
 from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm
@@ -29,17 +30,34 @@ def register(request):
     return render(request, 'eduard/register.html', {'form': form})
 
 
+def _is_safe_url(url, request):
+    """
+    Return True only if the redirect target is safe to use.
+
+    Django's url_has_allowed_host_and_scheme checks two things:
+    1. The URL does not point to an external host
+    2. The URL uses an allowed scheme (http/https, not javascript://)
+
+    Any URL that fails either check is rejected and the user falls
+    back to the default destination instead.
+    """
+    if not url:
+        return False
+    return url_has_allowed_host_and_scheme(
+        url=url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    )
+
+
 def user_login(request):
     if request.user.is_authenticated:
         return redirect('eduard:dashboard')
 
     if request.method == 'POST':
         username = request.POST.get('username', '').strip()
-
-        # Retrieve or create the attempt record for this username
         attempt, _ = LoginAttempt.objects.get_or_create(username=username)
 
-        # Check lockout before even validating credentials
         if attempt.is_locked():
             minutes = attempt.seconds_until_unlock() // 60
             seconds = attempt.seconds_until_unlock() % 60
@@ -57,7 +75,9 @@ def user_login(request):
             login(request, user)
             messages.success(request, f'Welcome back, {user.username}!')
             next_url = request.POST.get('next') or request.GET.get('next')
-            return redirect(next_url if next_url else 'eduard:dashboard')
+            if _is_safe_url(next_url, request):
+                return redirect(next_url)
+            return redirect('eduard:dashboard')
         else:
             attempt.record_failure()
             remaining = 5 - attempt.failed_attempts
@@ -77,12 +97,12 @@ def user_login(request):
 
     return render(request, 'eduard/login.html', {'form': form})
 
+
 def user_logout(request):
     if request.method == 'POST':
         logout(request)
         messages.info(request, 'You have been logged out.')
     return redirect('eduard:login')
-
 
 @login_required
 def dashboard(request):
