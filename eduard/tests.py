@@ -3,6 +3,7 @@ from django.urls import reverse
 from django.contrib.auth.models import User
 from django.contrib.auth.models import Group
 from django.core import mail
+from .models import LoginAttempt
 
 
 class RegistrationTests(TestCase):
@@ -284,3 +285,81 @@ class PasswordResetTests(TestCase):
     def test_reset_complete_page_loads(self):
         response = self.client.get(reverse('eduard:password_reset_complete'))
         self.assertEqual(response.status_code, 200)
+
+
+
+class BruteForceProtectionTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='bruteuser',
+            password='CorrectPass123!',
+        )
+        self.login_url = reverse('eduard:login')
+
+    def _fail_login(self, n):
+        """Helper to submit n failed login attempts."""
+        for _ in range(n):
+            self.client.post(self.login_url, {
+                'username': 'bruteuser',
+                'password': 'WrongPassword!',
+            })
+
+    def test_successful_login_works_normally(self):
+        response = self.client.post(self.login_url, {
+            'username': 'bruteuser',
+            'password': 'CorrectPass123!',
+        })
+        self.assertRedirects(response, reverse('eduard:dashboard'))
+
+    def test_failed_attempts_are_tracked(self):
+        self._fail_login(3)
+        attempt = LoginAttempt.objects.get(username='bruteuser')
+        self.assertEqual(attempt.failed_attempts, 3)
+        self.assertFalse(attempt.is_locked())
+
+    def test_account_locked_after_five_failures(self):
+        self._fail_login(5)
+        attempt = LoginAttempt.objects.get(username='bruteuser')
+        self.assertTrue(attempt.is_locked())
+
+    def test_locked_account_cannot_login_with_correct_password(self):
+        self._fail_login(5)
+        response = self.client.post(self.login_url, {
+            'username': 'bruteuser',
+            'password': 'CorrectPass123!',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_lockout_message_shown_to_user(self):
+        self._fail_login(5)
+        response = self.client.post(self.login_url, {
+            'username': 'bruteuser',
+            'password': 'CorrectPass123!',
+        })
+        self.assertContains(response, 'locked')
+
+    def test_successful_login_clears_failed_attempts(self):
+        self._fail_login(3)
+        self.client.post(self.login_url, {
+            'username': 'bruteuser',
+            'password': 'CorrectPass123!',
+        })
+        attempt = LoginAttempt.objects.get(username='bruteuser')
+        self.assertEqual(attempt.failed_attempts, 0)
+        self.assertIsNone(attempt.locked_until)
+
+    def test_unknown_username_does_not_crash(self):
+        response = self.client.post(self.login_url, {
+            'username': 'nonexistentuser',
+            'password': 'SomePass123!',
+        })
+        self.assertEqual(response.status_code, 200)
+
+    def test_warning_message_shows_remaining_attempts(self):
+        self._fail_login(3)
+        response = self.client.post(self.login_url, {
+            'username': 'bruteuser',
+            'password': 'WrongPassword!',
+        })
+        self.assertContains(response, 'remaining')

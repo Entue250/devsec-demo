@@ -4,6 +4,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, render, redirect
+from .models import LoginAttempt
 
 from .decorators import instructor_required
 from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm
@@ -31,18 +32,48 @@ def user_login(request):
         return redirect('eduard:dashboard')
 
     if request.method == 'POST':
+        username = request.POST.get('username', '').strip()
+
+        # Retrieve or create the attempt record for this username
+        attempt, _ = LoginAttempt.objects.get_or_create(username=username)
+
+        # Check lockout before even validating credentials
+        if attempt.is_locked():
+            minutes = attempt.seconds_until_unlock() // 60
+            seconds = attempt.seconds_until_unlock() % 60
+            messages.error(
+                request,
+                f'This account is locked due to too many failed attempts. '
+                f'Please try again in {minutes}m {seconds}s or reset your password.',
+            )
+            return render(request, 'eduard/login.html', {'form': LoginForm(request)})
+
         form = LoginForm(request, data=request.POST)
         if form.is_valid():
             user = form.get_user()
+            attempt.clear()
             login(request, user)
             messages.success(request, f'Welcome back, {user.username}!')
             next_url = request.POST.get('next') or request.GET.get('next')
             return redirect(next_url if next_url else 'eduard:dashboard')
+        else:
+            attempt.record_failure()
+            remaining = 5 - attempt.failed_attempts
+            if attempt.is_locked():
+                messages.error(
+                    request,
+                    'Too many failed attempts. This account is locked for 15 minutes.',
+                )
+            else:
+                messages.error(
+                    request,
+                    f'Invalid username or password. '
+                    f'{remaining} attempt{"s" if remaining != 1 else ""} remaining before lockout.',
+                )
     else:
         form = LoginForm(request)
 
     return render(request, 'eduard/login.html', {'form': form})
-
 
 def user_logout(request):
     if request.method == 'POST':
