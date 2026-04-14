@@ -6,7 +6,6 @@ from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, render, redirect
 from .models import LoginAttempt
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from .decorators import instructor_required
