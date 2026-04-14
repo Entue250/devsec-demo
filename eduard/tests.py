@@ -4,7 +4,6 @@ from django.urls import reverse
 from django.contrib.auth.models import User
 from django.contrib.auth.models import Group
 from django.core import mail
-from .models import LoginAttempt
 from eduard.views import _is_safe_url
 from .models import LoginAttempt, UserProfile
 

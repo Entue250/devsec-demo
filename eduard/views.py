@@ -20,8 +20,6 @@ from .audit import (
     log_password_reset_request,
 )
 from .decorators import instructor_required
-from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm
-from .models import LoginAttempt
 
 from django.contrib.auth.views import PasswordResetView
 from django.urls import reverse_lazy
