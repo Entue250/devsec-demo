@@ -442,7 +442,7 @@ def test_logout_requires_post(self):
         Logout must only work via POST, not GET. A GET-based logout
         would be vulnerable to CSRF via a simple link or image tag.
         """
-        response = self.client.get(reverse('eduard:logout'))
+        self.client.get(reverse('eduard:logout'))
         # User must still be logged in after a GET request to logout
         self.assertIn(
             '_auth_user_id',
