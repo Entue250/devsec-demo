@@ -1,14 +1,15 @@
 from django.contrib import messages
 from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render, redirect
-from .decorators import instructor_required
+from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404, render, redirect
 
+from .decorators import instructor_required
 from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm
 
 
 def register(request):
-    
     if request.user.is_authenticated:
         return redirect('eduard:dashboard')
 
@@ -26,7 +27,6 @@ def register(request):
 
 
 def user_login(request):
-    
     if request.user.is_authenticated:
         return redirect('eduard:dashboard')
 
@@ -45,7 +45,6 @@ def user_login(request):
 
 
 def user_logout(request):
-    
     if request.method == 'POST':
         logout(request)
         messages.info(request, 'You have been logged out.')
@@ -54,19 +53,52 @@ def user_logout(request):
 
 @login_required
 def dashboard(request):
-    
     return render(request, 'eduard/dashboard.html')
 
 
 @login_required
 def profile(request):
-    
-    return render(request, 'eduard/profile.html')
+    """
+    Always serves the currently authenticated user's own profile.
+    No user identifier is accepted from the URL — the identity comes
+    exclusively from the session, so there is no object reference to
+    manipulate.
+    """
+    return render(request, 'eduard/profile.html', {'profile_user': request.user})
+
+
+@login_required
+def profile_by_id(request, user_id):
+    """
+    IDOR-safe profile lookup by user ID.
+
+    The risk: if this view simply did User.objects.get(id=user_id),
+    any logged-in user could view any other user's profile by changing
+    the user_id in the URL.
+
+    The fix: only staff and instructors may look up profiles by ID.
+    Normal users are raised a 403 immediately — they must use /profile/
+    which always serves their own data from the session.
+    """
+    is_privileged = (
+        request.user.is_staff
+        or request.user.is_superuser
+        or request.user.groups.filter(name='Instructor').exists()
+    )
+
+    if not is_privileged:
+        raise PermissionDenied
+
+    profile_user = get_object_or_404(User, id=user_id)
+    return render(request, 'eduard/profile.html', {'profile_user': profile_user})
 
 
 @login_required
 def change_password(request):
-    
+    """
+    Password change always operates on request.user — never on a URL
+    parameter — so there is no object reference to manipulate here.
+    """
     if request.method == 'POST':
         form = UserPasswordChangeForm(request.user, request.POST)
         if form.is_valid():
@@ -86,13 +118,12 @@ def instructor_dashboard(request):
     Accessible only to users in the Instructor group or staff/superusers.
     Normal authenticated users get a 403 Forbidden response.
     """
-    from django.contrib.auth.models import User
     users = User.objects.all().order_by('date_joined')
     return render(request, 'eduard/instructor_dashboard.html', {'users': users})
 
 
 def forbidden(request, exception=None):
     """
-    Custom 403 handler — renders a friendly error page.
+    Custom 403 handler - renders a friendly error page.
     """
     return render(request, 'eduard/403.html', status=403)

@@ -140,3 +140,88 @@ class InstructorAccessTests(TestCase):
         self.client.login(username='instructor', password='TestPass123!')
         response = self.client.get(reverse('eduard:instructor_dashboard'))
         self.assertContains(response, 'normal')
+
+
+class ProfileIDORTests(TestCase):
+    def setUp(self):
+        self.user_a = User.objects.create_user(
+            username='usera', password='TestPass123!'
+        )
+        self.user_b = User.objects.create_user(
+            username='userb', password='TestPass123!'
+        )
+        self.instructor_group, _ = Group.objects.get_or_create(name='Instructor')
+        self.instructor = User.objects.create_user(
+            username='instrtest', password='TestPass123!'
+        )
+        self.instructor.groups.add(self.instructor_group)
+
+    def test_user_can_view_own_profile(self):
+        self.client.login(username='usera', password='TestPass123!')
+        response = self.client.get(reverse('eduard:profile'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'usera')
+
+    def test_normal_user_cannot_access_profile_by_id(self):
+        """
+        Normal users must not be able to look up other profiles by ID.
+        Attempting profile_by_id as a normal user must return 403.
+        """
+        self.client.login(username='usera', password='TestPass123!')
+        response = self.client.get(
+            reverse('eduard:profile_by_id', args=[self.user_b.id])
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_normal_user_cannot_access_own_profile_by_id(self):
+        """
+        Even accessing your own profile via the ID URL is blocked for
+        normal users — they must use /profile/ only.
+        """
+        self.client.login(username='usera', password='TestPass123!')
+        response = self.client.get(
+            reverse('eduard:profile_by_id', args=[self.user_a.id])
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_instructor_can_access_profile_by_id(self):
+        self.client.login(username='instrtest', password='TestPass123!')
+        response = self.client.get(
+            reverse('eduard:profile_by_id', args=[self.user_a.id])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'usera')
+
+    def test_anonymous_user_cannot_access_profile_by_id(self):
+        response = self.client.get(
+            reverse('eduard:profile_by_id', args=[self.user_a.id])
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_profile_by_id_nonexistent_user_returns_404(self):
+        """
+        Looking up a non-existent user ID must return 404, not a
+        server error — and must not leak whether the user exists.
+        """
+        self.client.login(username='instrtest', password='TestPass123!')
+        response = self.client.get(
+            reverse('eduard:profile_by_id', args=[99999])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_change_password_uses_session_not_url(self):
+        """
+        Password change must always operate on the session user,
+        never on a URL parameter — no IDOR vector exists here.
+        """
+        self.client.login(username='usera', password='TestPass123!')
+        response = self.client.post(reverse('eduard:change_password'), {
+            'old_password': 'TestPass123!',
+            'new_password1': 'NewSecure456!',
+            'new_password2': 'NewSecure456!',
+        })
+        self.assertRedirects(response, reverse('eduard:profile'))
+        self.user_a.refresh_from_db()
+        self.assertTrue(self.user_a.check_password('NewSecure456!'))
+        self.user_b.refresh_from_db()
+        self.assertTrue(self.user_b.check_password('TestPass123!'))
