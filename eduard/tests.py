@@ -1,3 +1,4 @@
+import logging
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth.models import User
@@ -560,3 +561,99 @@ class OpenRedirectTests(TestCase):
         """Unit test the helper directly with None input."""
         request = self.client.get('/').wsgi_request
         self.assertFalse(_is_safe_url(None, request))
+
+
+class AuditLoggingTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='audituser',
+            email='audit@example.com',
+            password='TestPass123!',
+        )
+
+    def test_registration_is_logged(self):
+        with self.assertLogs('eduard.audit', level='INFO') as log:
+            self.client.post(reverse('eduard:register'), {
+                'username': 'newaudituser',
+                'email': 'new@example.com',
+                'password1': 'StrongPass123!',
+                'password2': 'StrongPass123!',
+            })
+        self.assertTrue(
+            any('event=registration' in m and 'newaudituser' in m for m in log.output)
+        )
+
+    def test_login_success_is_logged(self):
+        with self.assertLogs('eduard.audit', level='INFO') as log:
+            self.client.post(reverse('eduard:login'), {
+                'username': 'audituser',
+                'password': 'TestPass123!',
+            })
+        self.assertTrue(
+            any('event=login' in m and 'status=success' in m for m in log.output)
+        )
+
+    def test_login_failure_is_logged(self):
+        with self.assertLogs('eduard.audit', level='WARNING') as log:
+            self.client.post(reverse('eduard:login'), {
+                'username': 'audituser',
+                'password': 'WrongPass!',
+            })
+        self.assertTrue(
+            any('event=login' in m and 'status=failure' in m for m in log.output)
+        )
+
+    def test_logout_is_logged(self):
+        self.client.login(username='audituser', password='TestPass123!')
+        with self.assertLogs('eduard.audit', level='INFO') as log:
+            self.client.post(reverse('eduard:logout'))
+        self.assertTrue(
+            any('event=logout' in m and 'audituser' in m for m in log.output)
+        )
+
+    def test_password_change_is_logged(self):
+        self.client.login(username='audituser', password='TestPass123!')
+        with self.assertLogs('eduard.audit', level='INFO') as log:
+            self.client.post(reverse('eduard:change_password'), {
+                'old_password': 'TestPass123!',
+                'new_password1': 'NewPass456!',
+                'new_password2': 'NewPass456!',
+            })
+        self.assertTrue(
+            any('event=password_change' in m for m in log.output)
+        )
+
+    def test_password_never_appears_in_logs(self):
+        with self.assertLogs('eduard.audit', level='INFO') as log:
+            self.client.post(reverse('eduard:register'), {
+                'username': 'logcheckuser',
+                'email': 'logcheck@example.com',
+                'password1': 'SuperSecret999!',
+                'password2': 'SuperSecret999!',
+            })
+        for entry in log.output:
+            self.assertNotIn('SuperSecret999!', entry)
+
+    def test_account_lockout_is_logged(self):
+        for _ in range(5):
+            self.client.post(reverse('eduard:login'), {
+                'username': 'audituser',
+                'password': 'WrongPass!',
+            })
+        with self.assertLogs('eduard.audit', level='WARNING') as log:
+            self.client.post(reverse('eduard:login'), {
+                'username': 'audituser',
+                'password': 'TestPass123!',
+            })
+        self.assertTrue(
+            any('event=login' in m and 'status=locked' in m for m in log.output)
+        )
+
+def test_password_reset_request_is_logged(self):
+    with self.assertLogs('eduard.audit', level='INFO') as log:
+        self.client.post(reverse('eduard:password_reset'), {
+            'email': 'audit@example.com',
+        })
+    self.assertTrue(
+        any('event=password_reset_request' in m for m in log.output)
+    )

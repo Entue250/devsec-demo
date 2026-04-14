@@ -1,15 +1,44 @@
+import json
+import logging
+
 from django.contrib import messages
 from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
-from django.shortcuts import get_object_or_404, render, redirect
-from .models import LoginAttempt
 from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, render, redirect
 from django.utils.http import url_has_allowed_host_and_scheme
 
+from .audit import (
+    log_registration,
+    log_login_success,
+    log_login_failure,
+    log_account_locked,
+    log_logout,
+    log_password_change,
+    log_password_reset_request,
+)
 from .decorators import instructor_required
 from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm
+from .models import LoginAttempt
+
+from django.contrib.auth.views import PasswordResetView
+from django.urls import reverse_lazy
+
+
+def _is_safe_url(url, request):
+    """
+    Return True only if the redirect target is safe to use.
+    Rejects external hosts and dangerous schemes such as javascript://.
+    """
+    if not url:
+        return False
+    return url_has_allowed_host_and_scheme(
+        url=url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    )
 
 
 def register(request):
@@ -20,6 +49,7 @@ def register(request):
         form = RegistrationForm(request.POST)
         if form.is_valid():
             user = form.save()
+            log_registration(request, user.username)
             login(request, user)
             messages.success(request, f'Welcome, {user.username}! Your account was created.')
             return redirect('eduard:dashboard')
@@ -27,26 +57,6 @@ def register(request):
         form = RegistrationForm()
 
     return render(request, 'eduard/register.html', {'form': form})
-
-
-def _is_safe_url(url, request):
-    """
-    Return True only if the redirect target is safe to use.
-
-    Django's url_has_allowed_host_and_scheme checks two things:
-    1. The URL does not point to an external host
-    2. The URL uses an allowed scheme (http/https, not javascript://)
-
-    Any URL that fails either check is rejected and the user falls
-    back to the default destination instead.
-    """
-    if not url:
-        return False
-    return url_has_allowed_host_and_scheme(
-        url=url,
-        allowed_hosts={request.get_host()},
-        require_https=request.is_secure(),
-    )
 
 
 def user_login(request):
@@ -58,6 +68,7 @@ def user_login(request):
         attempt, _ = LoginAttempt.objects.get_or_create(username=username)
 
         if attempt.is_locked():
+            log_account_locked(request, username)
             minutes = attempt.seconds_until_unlock() // 60
             seconds = attempt.seconds_until_unlock() % 60
             messages.error(
@@ -72,6 +83,7 @@ def user_login(request):
             user = form.get_user()
             attempt.clear()
             login(request, user)
+            log_login_success(request, user.username)
             messages.success(request, f'Welcome back, {user.username}!')
             next_url = request.POST.get('next') or request.GET.get('next')
             if _is_safe_url(next_url, request):
@@ -79,6 +91,7 @@ def user_login(request):
             return redirect('eduard:dashboard')
         else:
             attempt.record_failure()
+            log_login_failure(request, username, attempt.failed_attempts)
             remaining = 5 - attempt.failed_attempts
             if attempt.is_locked():
                 messages.error(
@@ -99,9 +112,12 @@ def user_login(request):
 
 def user_logout(request):
     if request.method == 'POST':
+        username = request.user.username
         logout(request)
+        log_logout(request, username)
         messages.info(request, 'You have been logged out.')
     return redirect('eduard:login')
+
 
 @login_required
 def dashboard(request):
@@ -110,52 +126,30 @@ def dashboard(request):
 
 @login_required
 def profile(request):
-    """
-    Always serves the currently authenticated user's own profile.
-    No user identifier is accepted from the URL — the identity comes
-    exclusively from the session, so there is no object reference to
-    manipulate.
-    """
     return render(request, 'eduard/profile.html', {'profile_user': request.user})
 
 
 @login_required
 def profile_by_id(request, user_id):
-    """
-    IDOR-safe profile lookup by user ID.
-
-    The risk: if this view simply did User.objects.get(id=user_id),
-    any logged-in user could view any other user's profile by changing
-    the user_id in the URL.
-
-    The fix: only staff and instructors may look up profiles by ID.
-    Normal users are raised a 403 immediately — they must use /profile/
-    which always serves their own data from the session.
-    """
     is_privileged = (
         request.user.is_staff
         or request.user.is_superuser
         or request.user.groups.filter(name='Instructor').exists()
     )
-
     if not is_privileged:
         raise PermissionDenied
-
     profile_user = get_object_or_404(User, id=user_id)
     return render(request, 'eduard/profile.html', {'profile_user': profile_user})
 
 
 @login_required
 def change_password(request):
-    """
-    Password change always operates on request.user — never on a URL
-    parameter — so there is no object reference to manipulate here.
-    """
     if request.method == 'POST':
         form = UserPasswordChangeForm(request.user, request.POST)
         if form.is_valid():
             user = form.save()
             update_session_auth_hash(request, user)
+            log_password_change(request, request.user.username)
             messages.success(request, 'Your password was updated successfully.')
             return redirect('eduard:profile')
     else:
@@ -164,63 +158,13 @@ def change_password(request):
     return render(request, 'eduard/change_password.html', {'form': form})
 
 
-@instructor_required
-def instructor_dashboard(request):
-    """
-    Accessible only to users in the Instructor group or staff/superusers.
-    Normal authenticated users get a 403 Forbidden response.
-    """
-    users = User.objects.all().order_by('date_joined')
-    return render(request, 'eduard/instructor_dashboard.html', {'users': users})
-
-
-def forbidden(request, exception=None):
-    """
-    Custom 403 handler - renders a friendly error page.
-    """
-    return render(request, 'eduard/403.html', status=403)
-
-
-
-# ---------------------------------------------------------------------------
-# CSRF demonstration - insecure version (immediately replaced below)
-# ---------------------------------------------------------------------------
-# The view below shows what an unsafe CSRF-exempt endpoint looks like.
-# It is defined here for reference only and is NOT wired to any URL.
-# Decorating a state-changing endpoint with @csrf_exempt removes Django's
-# CSRF check entirely, meaning any website can silently trigger this action
-# on behalf of a logged-in user just by submitting a hidden form or fetch().
-#
-# @csrf_exempt                        # UNSAFE - do not use on POST endpoints
-# @login_required
-# def update_display_name_unsafe(request):
-#     if request.method == 'POST':
-#         name = request.POST.get('display_name', '')
-#         request.user.first_name = name
-#         request.user.save()
-#         return JsonResponse({'status': 'ok'})
-#     return JsonResponse({'error': 'method not allowed'}, status=405)
-# ---------------------------------------------------------------------------
-
-
 @login_required
 def update_display_name(request):
     """
-    AJAX endpoint that lets a user update their display name.
-
-    CSRF fix: this endpoint does NOT use @csrf_exempt. Django's
-    CsrfViewMiddleware is active globally in settings.py, so every
-    POST request must include a valid CSRF token. The JavaScript
-    in the profile template reads the token from the cookie using
-    the standard Django pattern and sends it in the X-CSRFToken
-    header, which Django accepts as equivalent to the form field.
-
-    This means a cross-origin attacker cannot trigger this endpoint
-    because they cannot read the victim's CSRF cookie from a
-    different origin (same-origin policy).
+    AJAX endpoint for updating display name.
+    CSRF-safe: uses X-CSRFToken header pattern, no @csrf_exempt.
     """
     if request.method == 'POST':
-        import json
         try:
             data = json.loads(request.body)
         except (json.JSONDecodeError, ValueError):
@@ -235,3 +179,29 @@ def update_display_name(request):
         return JsonResponse({'status': 'ok', 'display_name': display_name})
 
     return JsonResponse({'error': 'method not allowed'}, status=405)
+
+
+@instructor_required
+def instructor_dashboard(request):
+    users = User.objects.all().order_by('date_joined')
+    return render(request, 'eduard/instructor_dashboard.html', {'users': users})
+
+
+class AuditedPasswordResetView(PasswordResetView):
+    """
+    Extends Django's PasswordResetView to add audit logging.
+    Logs the email submitted without revealing whether an account exists.
+    """
+    template_name = 'eduard/password_reset.html'
+    email_template_name = 'eduard/password_reset_email.txt'
+    subject_template_name = 'eduard/password_reset_subject.txt'
+    success_url = reverse_lazy('eduard:password_reset_done')
+
+def form_valid(self, form):
+    email = form.cleaned_data.get('email', '')
+    log_password_reset_request(self.request, email)
+    return super().form_valid(form)
+
+
+def forbidden(request, exception=None):
+    return render(request, 'eduard/403.html', status=403)
