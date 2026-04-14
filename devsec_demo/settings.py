@@ -124,3 +124,10 @@ STATIC_URL = 'static/'
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/login/'
+
+# Email backend - uses console in development so reset emails print
+# to the terminal instead of requiring a real mail server.
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# How long password reset tokens are valid (in days)
+PASSWORD_RESET_TIMEOUT = 86400  # 24 hours in seconds

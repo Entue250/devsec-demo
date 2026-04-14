@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth.models import User
 from django.contrib.auth.models import Group
+from django.core import mail
 
 
 class RegistrationTests(TestCase):
@@ -225,3 +226,61 @@ class ProfileIDORTests(TestCase):
         self.assertTrue(self.user_a.check_password('NewSecure456!'))
         self.user_b.refresh_from_db()
         self.assertTrue(self.user_b.check_password('TestPass123!'))
+
+
+
+class PasswordResetTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='resetuser',
+            email='reset@example.com',
+            password='OldPass123!',
+        )
+
+    def test_reset_request_page_loads(self):
+        response = self.client.get(reverse('eduard:password_reset'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_reset_request_with_valid_email_sends_mail(self):
+        response = self.client.post(reverse('eduard:password_reset'), {
+            'email': 'reset@example.com',
+        })
+        self.assertRedirects(
+            response,
+            reverse('eduard:password_reset_done'),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_reset_request_with_unknown_email_does_not_leak(self):
+        """
+        Submitting an email that has no account must still redirect to
+        the done page - not an error - to prevent user enumeration.
+        """
+        response = self.client.post(reverse('eduard:password_reset'), {
+            'email': 'nobody@example.com',
+        })
+        self.assertRedirects(
+            response,
+            reverse('eduard:password_reset_done'),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_reset_done_page_loads(self):
+        response = self.client.get(reverse('eduard:password_reset_done'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_reset_confirm_invalid_token_shows_error(self):
+        response = self.client.get(
+            reverse('eduard:password_reset_confirm', kwargs={
+                'uidb64': 'invalid',
+                'token': 'invalid-token',
+            })
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'invalid or expired')
+
+    def test_reset_complete_page_loads(self):
+        response = self.client.get(reverse('eduard:password_reset_complete'))
+        self.assertEqual(response.status_code, 200)
