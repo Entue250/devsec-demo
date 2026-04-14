@@ -121,6 +121,6 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-LOGIN_URL = 'eduard:login'
-LOGIN_REDIRECT_URL = 'eduard:dashboard'
-LOGOUT_REDIRECT_URL = 'eduard:login'
+LOGIN_URL = '/login/'
+LOGIN_REDIRECT_URL = '/dashboard/'
+LOGOUT_REDIRECT_URL = '/login/'

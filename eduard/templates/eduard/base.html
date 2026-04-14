@@ -129,6 +129,9 @@
         {% if user.is_authenticated %}
         <a href="{% url 'eduard:dashboard' %}">Dashboard</a>
         <a href="{% url 'eduard:profile' %}">Profile</a>
+        {% if user.is_staff or user.is_superuser or user.groups.all %}
+        <a href="{% url 'eduard:instructor_dashboard' %}">Instructor</a>
+        {% endif %}
         <form method="post" action="{% url 'eduard:logout' %}" style="display: inline">
           {% csrf_token %}
           <button

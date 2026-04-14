@@ -1,6 +1,7 @@
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth.models import User
+from django.contrib.auth.models import Group
 
 
 class RegistrationTests(TestCase):
@@ -99,3 +100,43 @@ class PasswordChangeTests(TestCase):
         self.assertRedirects(response, reverse('eduard:profile'))
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password('NewPass456!'))
+
+
+
+class InstructorAccessTests(TestCase):
+    def setUp(self):
+        self.instructor_group, _ = Group.objects.get_or_create(name='Instructor')
+        self.normal_user = User.objects.create_user(
+            username='normal', password='TestPass123!'
+        )
+        self.instructor_user = User.objects.create_user(
+            username='instructor', password='TestPass123!'
+        )
+        self.instructor_user.groups.add(self.instructor_group)
+        self.staff_user = User.objects.create_user(
+            username='staffuser', password='TestPass123!', is_staff=True
+        )
+
+    def test_anonymous_redirected_from_instructor_page(self):
+        response = self.client.get(reverse('eduard:instructor_dashboard'))
+        self.assertEqual(response.status_code, 302)
+
+    def test_normal_user_gets_403_on_instructor_page(self):
+        self.client.login(username='normal', password='TestPass123!')
+        response = self.client.get(reverse('eduard:instructor_dashboard'))
+        self.assertEqual(response.status_code, 403)
+
+    def test_instructor_can_access_instructor_page(self):
+        self.client.login(username='instructor', password='TestPass123!')
+        response = self.client.get(reverse('eduard:instructor_dashboard'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_staff_can_access_instructor_page(self):
+        self.client.login(username='staffuser', password='TestPass123!')
+        response = self.client.get(reverse('eduard:instructor_dashboard'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_instructor_page_shows_user_list(self):
+        self.client.login(username='instructor', password='TestPass123!')
+        response = self.client.get(reverse('eduard:instructor_dashboard'))
+        self.assertContains(response, 'normal')

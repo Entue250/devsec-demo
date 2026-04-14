@@ -2,6 +2,8 @@ from django.contrib import messages
 from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect
+from django.core.exceptions import PermissionDenied
+from .decorators import instructor_required
 
 from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm
 
@@ -77,3 +79,21 @@ def change_password(request):
         form = UserPasswordChangeForm(request.user)
 
     return render(request, 'eduard/change_password.html', {'form': form})
+
+
+@instructor_required
+def instructor_dashboard(request):
+    """
+    Accessible only to users in the Instructor group or staff/superusers.
+    Normal authenticated users get a 403 Forbidden response.
+    """
+    from django.contrib.auth.models import User
+    users = User.objects.all().order_by('date_joined')
+    return render(request, 'eduard/instructor_dashboard.html', {'users': users})
+
+
+def forbidden(request, exception=None):
+    """
+    Custom 403 handler — renders a friendly error page.
+    """
+    return render(request, 'eduard/403.html', status=403)
