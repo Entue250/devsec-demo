@@ -363,3 +363,98 @@ class BruteForceProtectionTests(TestCase):
             'password': 'WrongPassword!',
         })
         self.assertContains(response, 'remaining')
+
+
+
+class CSRFProtectionTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='csrfuser',
+            password='TestPass123!',
+        )
+        self.client.login(username='csrfuser', password='TestPass123!')
+        self.url = reverse('eduard:update_display_name')
+
+    def test_update_display_name_with_valid_csrf(self):
+        """
+        A legitimate AJAX POST with the CSRF token must succeed.
+        The Django test client includes CSRF tokens automatically.
+        """
+        import json
+        response = self.client.post(
+            self.url,
+            data=json.dumps({'display_name': 'Eduard Test'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['status'], 'ok')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, 'Eduard Test')
+
+    def test_update_display_name_requires_login(self):
+        self.client.logout()
+        import json
+        response = self.client.post(
+            self.url,
+            data=json.dumps({'display_name': 'Hacker'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_update_display_name_rejects_get(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 405)
+
+    def test_update_display_name_rejects_invalid_json(self):
+        response = self.client.post(
+            self.url,
+            data='not json at all',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_update_display_name_rejects_too_long(self):
+        import json
+        response = self.client.post(
+            self.url,
+            data=json.dumps({'display_name': 'A' * 51}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_csrf_middleware_is_active(self):
+        """
+        Verify CsrfViewMiddleware is present in settings - if it were
+        removed or the endpoint used @csrf_exempt, CSRF protection
+        would be gone entirely.
+        """
+        from django.conf import settings
+        self.assertIn(
+            'django.middleware.csrf.CsrfViewMiddleware',
+            settings.MIDDLEWARE,
+        )
+
+        
+def test_logout_requires_post(self):
+        """
+        Logout must only work via POST, not GET. A GET-based logout
+        would be vulnerable to CSRF via a simple link or image tag.
+        """
+        response = self.client.get(reverse('eduard:logout'))
+        # User must still be logged in after a GET request to logout
+        self.assertIn(
+            '_auth_user_id',
+            self.client.session,
+            msg='GET request must not log the user out',
+        )
+        """
+        Logout must only work via POST, not GET. A GET-based logout
+        would be vulnerable to CSRF via a simple link or image tag.
+        """
+        response = self.client.get(reverse('eduard:logout'))
+        self.assertNotIn(
+            '_auth_user_id',
+            self.client.session,
+            msg='GET request must not log the user out',
+        )

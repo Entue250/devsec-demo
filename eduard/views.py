@@ -5,6 +5,8 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, render, redirect
 from .models import LoginAttempt
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 
 from .decorators import instructor_required
 from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm
@@ -158,3 +160,59 @@ def forbidden(request, exception=None):
     Custom 403 handler - renders a friendly error page.
     """
     return render(request, 'eduard/403.html', status=403)
+
+
+
+# ---------------------------------------------------------------------------
+# CSRF demonstration - insecure version (immediately replaced below)
+# ---------------------------------------------------------------------------
+# The view below shows what an unsafe CSRF-exempt endpoint looks like.
+# It is defined here for reference only and is NOT wired to any URL.
+# Decorating a state-changing endpoint with @csrf_exempt removes Django's
+# CSRF check entirely, meaning any website can silently trigger this action
+# on behalf of a logged-in user just by submitting a hidden form or fetch().
+#
+# @csrf_exempt                        # UNSAFE - do not use on POST endpoints
+# @login_required
+# def update_display_name_unsafe(request):
+#     if request.method == 'POST':
+#         name = request.POST.get('display_name', '')
+#         request.user.first_name = name
+#         request.user.save()
+#         return JsonResponse({'status': 'ok'})
+#     return JsonResponse({'error': 'method not allowed'}, status=405)
+# ---------------------------------------------------------------------------
+
+
+@login_required
+def update_display_name(request):
+    """
+    AJAX endpoint that lets a user update their display name.
+
+    CSRF fix: this endpoint does NOT use @csrf_exempt. Django's
+    CsrfViewMiddleware is active globally in settings.py, so every
+    POST request must include a valid CSRF token. The JavaScript
+    in the profile template reads the token from the cookie using
+    the standard Django pattern and sends it in the X-CSRFToken
+    header, which Django accepts as equivalent to the form field.
+
+    This means a cross-origin attacker cannot trigger this endpoint
+    because they cannot read the victim's CSRF cookie from a
+    different origin (same-origin policy).
+    """
+    if request.method == 'POST':
+        import json
+        try:
+            data = json.loads(request.body)
+        except (json.JSONDecodeError, ValueError):
+            return JsonResponse({'error': 'invalid JSON'}, status=400)
+
+        display_name = data.get('display_name', '').strip()
+        if len(display_name) > 50:
+            return JsonResponse({'error': 'Display name too long'}, status=400)
+
+        request.user.first_name = display_name
+        request.user.save(update_fields=['first_name'])
+        return JsonResponse({'status': 'ok', 'display_name': display_name})
+
+    return JsonResponse({'error': 'method not allowed'}, status=405)
