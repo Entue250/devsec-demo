@@ -1,4 +1,4 @@
-
+import io
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth.models import User
@@ -6,6 +6,8 @@ from django.contrib.auth.models import Group
 from django.core import mail
 from eduard.views import _is_safe_url
 from .models import LoginAttempt, UserProfile
+
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 class RegistrationTests(TestCase):
     def test_register_page_loads(self):
@@ -725,3 +727,129 @@ class StoredXSSTests(TestCase):
             template_source = f.read()
         self.assertNotIn('bio|safe', template_source)
         self.assertNotIn('bio | safe', template_source)
+
+
+
+class FileUploadSecurityTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='uploaduser',
+            password='TestPass123!',
+        )
+        self.client.login(username='uploaduser', password='TestPass123!')
+        self.profile_url = reverse('eduard:profile')
+
+    def _make_jpeg(self, size=100):
+        """Create a minimal valid JPEG file in memory."""
+        from PIL import Image
+        img = Image.new('RGB', (size, size), color='red')
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG')
+        buf.seek(0)
+        return buf
+
+    def _make_png(self):
+        """Create a minimal valid PNG file in memory."""
+        from PIL import Image
+        img = Image.new('RGB', (10, 10), color='blue')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return buf
+
+    def test_valid_jpeg_upload_accepted(self):
+        buf = self._make_jpeg()
+        upload = SimpleUploadedFile('avatar.jpg', buf.read(), content_type='image/jpeg')
+        response = self.client.post(self.profile_url, {
+            'bio': 'Hello',
+            'avatar': upload,
+        })
+        self.assertRedirects(response, self.profile_url, fetch_redirect_response=False)
+
+    def test_valid_png_upload_accepted(self):
+        buf = self._make_png()
+        upload = SimpleUploadedFile('avatar.png', buf.read(), content_type='image/png')
+        response = self.client.post(self.profile_url, {
+            'bio': 'Hello',
+            'avatar': upload,
+        })
+        self.assertRedirects(response, self.profile_url, fetch_redirect_response=False)
+
+    def test_php_file_with_image_extension_rejected(self):
+        """
+        A PHP file renamed to .jpg must be rejected.
+        Django's ImageField validates file content before our custom
+        validator runs, so the error comes from Django's image check.
+        """
+        php_content = b'<?php echo shell_exec($_GET["cmd"]); ?>'
+        upload = SimpleUploadedFile('evil.jpg', php_content, content_type='image/jpeg')
+        response = self.client.post(self.profile_url, {
+            'bio': 'Hello',
+            'avatar': upload,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'valid image')
+
+    def test_executable_extension_rejected(self):
+        """A .exe file must be rejected at the extension check."""
+        buf = self._make_jpeg()
+        upload = SimpleUploadedFile('evil.exe', buf.read(), content_type='image/jpeg')
+        response = self.client.post(self.profile_url, {
+            'bio': 'Hello',
+            'avatar': upload,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'not allowed')
+
+    def test_oversized_file_rejected(self):
+        """A file over 2MB must be rejected."""
+        from PIL import Image
+        import io
+        img = Image.new('RGB', (100, 100), color='red')
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG')
+        large_content = buf.getvalue() + b'A' * (3 * 1024 * 1024)
+        upload = SimpleUploadedFile('big.jpg', large_content, content_type='image/jpeg')
+        response = self.client.post(self.profile_url, {
+            'bio': 'Hello',
+            'avatar': upload,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'File too large')
+
+    def test_html_file_disguised_as_image_rejected(self):
+        """An HTML file with image extension must be rejected."""
+        html_content = b'<html><script>alert(1)</script></html>'
+        upload = SimpleUploadedFile('evil.png', html_content, content_type='image/png')
+        response = self.client.post(self.profile_url, {
+            'bio': 'Hello',
+            'avatar': upload,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'valid image')
+    def test_upload_requires_login(self):
+        self.client.logout()
+        buf = self._make_jpeg()
+        upload = SimpleUploadedFile('avatar.jpg', buf.read(), content_type='image/jpeg')
+        response = self.client.post(self.profile_url, {
+            'bio': 'Hello',
+            'avatar': upload,
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login/', response['Location'])
+
+    def test_safe_filename_discards_original_name(self):
+        """
+        Uploaded filenames must be replaced with random UUIDs to
+        prevent path traversal and filename-based attacks.
+        """
+        from .validators import safe_filename
+        result = safe_filename('../../etc/passwd.jpg')
+        self.assertNotIn('..', result)
+        self.assertNotIn('passwd', result)
+        self.assertTrue(result.endswith('.jpg'))
+
+    def test_max_upload_size_setting_exists(self):
+        from django.conf import settings
+        self.assertTrue(hasattr(settings, 'MAX_UPLOAD_SIZE'))
+        self.assertLessEqual(settings.MAX_UPLOAD_SIZE, 5 * 1024 * 1024)

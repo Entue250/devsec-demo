@@ -24,7 +24,7 @@ from .decorators import instructor_required
 from django.contrib.auth.views import PasswordResetView
 from django.urls import reverse_lazy
 
-from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm, BioForm
+from .forms import RegistrationForm, LoginForm, UserPasswordChangeForm, BioForm, ProfileForm
 from .models import LoginAttempt, UserProfile
 
 def _is_safe_url(url, request):
@@ -126,6 +126,30 @@ def dashboard(request):
 
 @login_required
 def profile(request):
+    """
+    Display and update the current user's profile including bio and avatar.
+
+    Upload security: ProfileForm.clean_avatar() runs validate_avatar()
+    which checks extension, file size, and magic bytes before saving.
+    The filename is randomised by avatar_upload_path to prevent
+    path traversal attacks.
+    """
+    user_profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    if request.method == 'POST':
+        form = ProfileForm(request.POST, request.FILES, instance=user_profile)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Profile updated successfully.')
+            return redirect('eduard:profile')
+    else:
+        form = ProfileForm(instance=user_profile)
+
+    return render(request, 'eduard/profile.html', {
+        'profile_user': request.user,
+        'user_profile': user_profile,
+        'bio_form': form,
+    })
     """
     Display and update the current user's profile including their bio.
 

@@ -157,3 +157,9 @@ LOGGING = {
         },
     },
 }
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Maximum avatar upload size: 2MB
+MAX_UPLOAD_SIZE = 2 * 1024 * 1024

@@ -61,7 +61,40 @@ class LoginAttempt(models.Model):
         self.save()
 
 
+def avatar_upload_path(instance, filename):
+    """
+    Store avatars in a per-user subdirectory with a randomised filename.
+    The original filename is discarded to prevent path traversal and
+    filename-based attacks.
+    """
+    from .validators import safe_filename
+    return f'avatars/user_{instance.user.id}/{safe_filename(filename)}'
+
+
 class UserProfile(models.Model):
+    """
+    Extends the built-in User with a bio field and avatar upload.
+
+    XSS risk: bio field must never be rendered with |safe.
+    Upload risk: avatar is validated by extension, size, and magic bytes
+    before saving. The filename is randomised on storage.
+    """
+    user = models.OneToOneField(
+        User, on_delete=models.CASCADE, related_name='profile'
+    )
+    bio = models.TextField(blank=True, max_length=500)
+    avatar = models.ImageField(
+        upload_to=avatar_upload_path,
+        blank=True,
+        null=True,
+    )
+
+    class Meta:
+        verbose_name = 'User profile'
+        verbose_name_plural = 'User profiles'
+
+    def __str__(self):
+        return f'Profile for {self.user.username}'
     """
     Extends the built-in User with a free-text bio field.
 

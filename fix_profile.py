@@ -1,4 +1,4 @@
-{% extends "eduard/base.html" %}
+content = """{% extends "eduard/base.html" %}
 {% block title %}Profile{% endblock %}
 {% block content %}
 <h1>
@@ -104,4 +104,8 @@ function updateDisplayName() {
 </script>
 <p style="margin-top:1.5rem;"><a href="{% url 'eduard:change_password' %}">Change password</a></p>
 {% endif %}
-{% endblock %}
+{% endblock %}"""
+
+with open("eduard/templates/eduard/profile.html", "w", encoding="utf-8") as f:
+    f.write(content)
+print("Done - profile.html written successfully")
