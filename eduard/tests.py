@@ -853,3 +853,59 @@ class FileUploadSecurityTests(TestCase):
         from django.conf import settings
         self.assertTrue(hasattr(settings, 'MAX_UPLOAD_SIZE'))
         self.assertLessEqual(settings.MAX_UPLOAD_SIZE, 5 * 1024 * 1024)
+
+
+
+class SecuritySettingsTests(TestCase):
+    def test_secret_key_is_set(self):
+        """SECRET_KEY must never be None or empty."""
+        from django.conf import settings
+        self.assertTrue(bool(settings.SECRET_KEY))
+
+    def test_debug_is_boolean(self):
+        """DEBUG must be a real boolean not a string."""
+        from django.conf import settings
+        self.assertIsInstance(settings.DEBUG, bool)
+
+    def test_allowed_hosts_is_not_empty(self):
+        """ALLOWED_HOSTS must have at least one entry."""
+        from django.conf import settings
+        self.assertTrue(len(settings.ALLOWED_HOSTS) > 0)
+
+    def test_session_cookie_httponly(self):
+        from django.conf import settings
+        self.assertTrue(settings.SESSION_COOKIE_HTTPONLY)
+
+    def test_session_cookie_samesite(self):
+        from django.conf import settings
+        self.assertEqual(settings.SESSION_COOKIE_SAMESITE, 'Lax')
+
+    def test_csrf_cookie_samesite(self):
+        from django.conf import settings
+        self.assertEqual(settings.CSRF_COOKIE_SAMESITE, 'Lax')
+
+    def test_content_type_nosniff(self):
+        from django.conf import settings
+        self.assertTrue(settings.SECURE_CONTENT_TYPE_NOSNIFF)
+
+    def test_x_frame_options_is_deny(self):
+        from django.conf import settings
+        self.assertEqual(settings.X_FRAME_OPTIONS, 'DENY')
+
+    def test_csrf_middleware_present(self):
+        from django.conf import settings
+        self.assertIn(
+            'django.middleware.csrf.CsrfViewMiddleware',
+            settings.MIDDLEWARE,
+        )
+
+    def test_security_middleware_present(self):
+        from django.conf import settings
+        self.assertIn(
+            'django.middleware.security.SecurityMiddleware',
+            settings.MIDDLEWARE,
+        )
+
+    def test_password_validators_configured(self):
+        from django.conf import settings
+        self.assertTrue(len(settings.AUTH_PASSWORD_VALIDATORS) >= 4)
