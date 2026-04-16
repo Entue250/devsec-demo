@@ -202,7 +202,24 @@ LOGOUT_REDIRECT_URL = '/login/'
 # Email
 # ---------------------------------------------------------------------------
 
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# Email configuration
+# In development with no email credentials set, falls back to console backend
+# so emails print to terminal. In production, set EMAIL_HOST_USER and
+# EMAIL_HOST_PASSWORD environment variables to send real emails via Gmail.
+_email_user = os.environ.get('EMAIL_HOST_USER')
+_email_password = os.environ.get('EMAIL_HOST_PASSWORD')
+
+if _email_user and _email_password:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = 'smtp.gmail.com'
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+    EMAIL_HOST_USER = _email_user
+    EMAIL_HOST_PASSWORD = _email_password
+    DEFAULT_FROM_EMAIL = _email_user
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    
 PASSWORD_RESET_TIMEOUT = 86400
 
 
